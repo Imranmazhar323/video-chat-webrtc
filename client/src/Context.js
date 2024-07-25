@@ -1,36 +1,44 @@
-import React, { createContext, useState, useRef, useEffect } from 'react';
-import { io } from 'socket.io-client';
-import Peer from 'simple-peer';
+import React, { createContext, useState, useRef, useEffect } from "react";
+import { io } from "socket.io-client";
+import Peer from "simple-peer";
 
 const SocketContext = createContext();
 
-// const socket = io('http://localhost:5000');
-const socket = io('https://warm-wildwood-81069.herokuapp.com');
+// const socket = io("http://192.168.0.84:3001");
+const socket = io("http://localhost:3001");
+// const socket = io('https://warm-wildwood-81069.herokuapp.com');
 
 const ContextProvider = ({ children }) => {
   const [callAccepted, setCallAccepted] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
   const [stream, setStream] = useState();
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const [call, setCall] = useState({});
-  const [me, setMe] = useState('');
+  const [me, setMe] = useState("");
 
   const myVideo = useRef();
   const userVideo = useRef();
   const connectionRef = useRef();
 
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
       .then((currentStream) => {
         setStream(currentStream);
 
         myVideo.current.srcObject = currentStream;
       });
 
-    socket.on('me', (id) => setMe(id));
+    socket.on("me", (id) => setMe(id));
 
-    socket.on('callUser', ({ from, name: callerName, signal }) => {
-      setCall({ isReceivingCall: true, from, name: callerName, signal });
+    socket.on("callUser", ({ from, name: callerName, signal, callType }) => {
+      setCall({
+        isReceivingCall: true,
+        from,
+        name: callerName,
+        signal,
+        callType,
+      });
     });
   }, []);
 
@@ -39,12 +47,19 @@ const ContextProvider = ({ children }) => {
 
     const peer = new Peer({ initiator: false, trickle: false, stream });
 
-    peer.on('signal', (data) => {
-      socket.emit('answerCall', { signal: data, to: call.from });
+    peer.on("signal", (data) => {
+      socket.emit("answerCall", { signal: data, to: call.from });
     });
 
-    peer.on('stream', (currentStream) => {
-      userVideo.current.srcObject = currentStream;
+    peer.on("stream", (currentStream) => {
+      if (call.callType === "video") {
+        userVideo.current.srcObject = currentStream;
+      } else {
+        // Handle audio-only call by playing the audio stream
+        const audio = new Audio();
+        audio.srcObject = currentStream;
+        audio.play();
+      }
     });
 
     peer.signal(call.signal);
@@ -52,18 +67,31 @@ const ContextProvider = ({ children }) => {
     connectionRef.current = peer;
   };
 
-  const callUser = (id) => {
+  const callUser = (id, callType = "video") => {
     const peer = new Peer({ initiator: true, trickle: false, stream });
 
-    peer.on('signal', (data) => {
-      socket.emit('callUser', { userToCall: id, signalData: data, from: me, name });
+    peer.on("signal", (data) => {
+      socket.emit("callUser", {
+        userToCall: id,
+        signalData: data,
+        from: me,
+        name,
+        callType,
+      });
     });
 
-    peer.on('stream', (currentStream) => {
-      userVideo.current.srcObject = currentStream;
+    peer.on("stream", (currentStream) => {
+      if (callType === "video") {
+        userVideo.current.srcObject = currentStream;
+      } else {
+        // Handle audio-only call by playing the audio stream
+        const audio = new Audio();
+        audio.srcObject = currentStream;
+        audio.play();
+      }
     });
 
-    socket.on('callAccepted', (signal) => {
+    socket.on("callAccepted", (signal) => {
       setCallAccepted(true);
 
       peer.signal(signal);
@@ -81,20 +109,21 @@ const ContextProvider = ({ children }) => {
   };
 
   return (
-    <SocketContext.Provider value={{
-      call,
-      callAccepted,
-      myVideo,
-      userVideo,
-      stream,
-      name,
-      setName,
-      callEnded,
-      me,
-      callUser,
-      leaveCall,
-      answerCall,
-    }}
+    <SocketContext.Provider
+      value={{
+        call,
+        callAccepted,
+        myVideo,
+        userVideo,
+        stream,
+        name,
+        setName,
+        callEnded,
+        me,
+        callUser,
+        leaveCall,
+        answerCall,
+      }}
     >
       {children}
     </SocketContext.Provider>
